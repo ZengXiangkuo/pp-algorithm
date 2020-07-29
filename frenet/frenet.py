@@ -5,7 +5,19 @@ import matplotlib.pyplot as plt
 
 
 def bezier_fn(pa, pb, pc, pd, t):
-    return pa * (1 - t) ** 3 + 3 * pb * t * (1 - t) ** 2 + 3 * pc * t ** 2 * (1 - t) + pd * t ** 3
+    a = pa * (1 - t) ** 3
+    b = 3 * pb * t * (1 - t) ** 2
+    c = 3 * pc * t ** 2 * (1 - t)
+    d = pd * t ** 3
+    return a + b + c + d
+
+
+def bezier_fn_d1(pa, pb, pc, pd, t):
+    a = -3 * pa * (1 - t) ** 2
+    b = 3 * pb * (1 - t) ** 2 - 6 * pb * t * (1 - t)
+    c = 6 * pc * t * (1 - t) - 3 * pc * t ** 2
+    d = 3 * pd * t ** 2
+    return a + b + c + d
 
 
 def bezier(points, num=100):
@@ -14,16 +26,35 @@ def bezier(points, num=100):
     return [bezier_fn(pa, pb, pc, pd, i / num) for i in range(num)]
 
 
-def bezier_curve(p1, p2, v1, v2):
-    points = [p1, [p1[0] + v1[0], p1[1] + v1[1]], [p2[0] + v2[0], p2[1] + v2[1]], p2]
-    return bezier(points)
+# reference points
+refs = [[0, 0], [100, 0], [0, 100], [100, 100]]
+refs = [np.array(p) for p in refs]
 
+# normalize
+normalize = lambda v: v / np.sqrt(v[0] * v[0] + v[1] * v[1])
+
+# right_normal
+right_normal = lambda v: np.array([v[1], -v[0]])
+
+# position vector
+r = lambda t: bezier_fn(*refs, t)
+
+# normal vector
+vn = lambda t: bezier_fn_d1(*refs, t)
+
+# arrow
+arrow = lambda t: [r(t), r(t) + 40 * normalize(vn(t))]
 
 # create a bezier curve by two points and two normal vectors.
-ps = bezier_curve([0, 0], [100, 0], [1, 1], [-2, 2])
+ps = bezier(refs)
 
 # display it.
 plt.figure()
 plt.grid('on')
-plt.plot([v[0] for v in ps], [v[1] for v in ps])
+plt.plot([v[0] for v in ps], [v[1] for v in ps], '-r', lw=2)
+
+for i in range(41):
+    arrow_ps = arrow(i / 40)
+    plt.plot([v[0] for v in arrow_ps], [v[1] for v in arrow_ps], ':b', lw=0.5)
+
 plt.show()

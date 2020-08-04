@@ -1,6 +1,7 @@
 # -*- coding:utf-8 -*-
 
 import numpy as np
+
 import matplotlib.pyplot as plt
 
 
@@ -51,10 +52,17 @@ ps = bezier(refs)
 # display it.
 plt.figure()
 plt.grid('on')
-plt.plot([v[0] for v in ps], [v[1] for v in ps], '-r', lw=2)
 
+# beizer
+plt.plot([v[0] for v in ps], [v[1] for v in ps], '-r', lw=2)
 for i in range(41):
     arrow_ps = arrow(i / 40)
     plt.plot([v[0] for v in arrow_ps], [v[1] for v in arrow_ps], ':b', lw=0.5)
+
+# move it 5
+f5 = np.poly1d([5])
+r_s = lambda t: r(t) + right_normal(normalize(vn(t))) * f5(t)
+ps = [r_s(i / 100) for i in range(101)]
+plt.plot([v[0] for v in ps], [v[1] for v in ps], '--g', lw=2)
 
 plt.show()

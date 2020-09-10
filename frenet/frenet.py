@@ -1,4 +1,5 @@
 # -*- coding:utf-8 -*-
+import math
 
 import numpy as np
 from scipy.optimize import fsolve
@@ -13,31 +14,8 @@ def bezier_fn(pa, pb, pc, pd, t):
     return a + b + c + d
 
 
-def bezier_fn_d1(pa, pb, pc, pd, t):
-    a = -3 * pa * (1 - t) ** 2
-    b = 3 * pb * (1 - t) ** 2 - 6 * pb * t * (1 - t)
-    c = 6 * pc * t * (1 - t) - 3 * pc * t ** 2
-    d = 3 * pd * t ** 2
-    return a + b + c + d
-
-
-def bezier_fn_d2(pa, pb, pc, pd, t):
-    a = 6 * pa * (1 - t)
-    b = -6 * pb * (1 - t) - 6 * pb * (1 - 2 * t)
-    c = 6 * pc * (1 - 2 * t) - 6 * pc * t
-    d = 6 * pd * t
-    return a + b + c + d
-
-
-def bezier(points, num=100):
-    assert (len(points) == 4)
-    pa, pb, pc, pd = [np.array(p) for p in points]
-    return [bezier_fn(pa, pb, pc, pd, i / num) for i in range(num)]
-
-
-# reference points
-refs = [[0, 0], [100, 0], [0, 100], [150, 100]]
-refs = [np.array(p) for p in refs]
+def vec_norm(v):
+    return np.sqrt(v[0] * v[0] + v[1] * v[1])
 
 
 # normalize
@@ -54,46 +32,94 @@ def vec_rate(v):
     return np.inf if v[0] == 0 else v[1] / v[0]
 
 
-# position vector
-def bezier_pos(t):
-    return bezier_fn(*refs, t)
+def vec_add(v1, v2, rate1=1, rate2=1):
+    return [v1[0] * rate1 + v2[0] * rate2, v1[1] * rate1 + v2[1] * rate2]
 
 
-def bezier_pos_d1(t):
-    return bezier_fn_d1(*refs, t)
+def compute_curve_params(params):
+    src_s = params[0]
+    src_l = params[1]
+    src_yaw = params[2]
+
+    dst_s = params[3]
+    dst_l = params[4]
+    dst_yaw = params[5]
+
+    def constraint(xx):
+        assert len(xx) == 12
+
+        trajectory_s = np.poly1d(xx[0:6])
+        trajectory_s_d1 = trajectory_s.deriv(1)
+        trajectory_s_d2 = trajectory_s.deriv(2)
+
+        trajectory_l = np.poly1d(xx[6:12])
+        trajectory_l_d1 = trajectory_l.deriv(1)
+        trajectory_l_d2 = trajectory_l.deriv(2)
+
+        ret = [0] * 12
+
+        ret[0] = trajectory_s(0) - src_s
+        ret[1] = trajectory_s_d1(0) - 100
+        ret[2] = trajectory_s_d2(0) - 0
+
+        ret[3] = trajectory_s(1) - dst_s
+        ret[4] = trajectory_s_d1(1) - 100
+        ret[5] = trajectory_s_d2(1) - 0
+
+        ret[6] = trajectory_l(0) - src_l
+        ret[7] = trajectory_l_d1(0) - 100 * math.tan(src_yaw)
+        ret[8] = trajectory_l_d2(0) - 0
+
+        ret[9] = trajectory_l(1) - dst_l
+        ret[10] = trajectory_l_d1(1) - 100 * math.tan(dst_yaw)
+        ret[11] = trajectory_l_d2(1) - 0
+
+        return ret
+
+    return fsolve(constraint, np.array([0] * 12))
 
 
-def bezier_pos_d2(t):
-    return bezier_fn_d2(*refs, t)
+# create lane map data by bezier
+num = 100
+refs = [[0, 0], [100, 0], [0, 100], [150, 100]]
+refs = [np.array(p) for p in refs]
+
+# central axis
+lane_xy = [bezier_fn(*refs, i / num) for i in range(num)]
+
+# lane direction
+lane_d = [0] * num
+
+# lane s
+lane_s = [0] * num
+
+# lane l
+lane_l = [100] * num
+
+for i in range(1, num):
+    v = vec_add(lane_xy[i], lane_xy[i - 1], 1, -1)
+    lane_s[i] = lane_s[i - 1] + vec_norm(v)
+    lane_d[i] = vec_normalize(np.array(v))
+lane_d[0] = lane_d[1]
+
+lane_e_l = [0] * num
+lane_e_r = [0] * num
+for i in range(num):
+    y_direct = vec_right_normal(lane_d[i])
+    lane_e_l[i] = vec_add(lane_xy[i], y_direct, 1, -20)
+    lane_e_r[i] = vec_add(lane_xy[i], y_direct, 1, 20)
 
 
-# normal vector
-def bezier_normal(t):
-    return vec_normalize(bezier_fn_d1(*refs, t))
+def frenet2xy(s, l):
+    index = 0
+    while index < num - 1 and lane_s[index + 1] < s:
+        index += 1
+    ds = s - lane_s[index]
+    x_direct = lane_d[index]
+    y_direct = vec_right_normal([-x_direct[0], -x_direct[1]])
+    pos = vec_add(lane_xy[index], x_direct, 1, ds)
+    return vec_add(pos, y_direct, 1, l)
 
-
-def bezier_normal_d1(t):
-    return vec_normalize(bezier_fn_d2(*refs, t))
-
-
-# arrow
-def bezier_arrow(t):
-    return [bezier_pos(t), bezier_pos(t) + 40 * bezier_normal(t)]
-
-
-def s_pos(fun, t):
-    return bezier_pos(t) + vec_right_normal(bezier_normal(t)) * fun(t)
-
-
-def s_pos_d1(fun, fun_d1, t):
-    a = bezier_pos_d1(t)
-    b = vec_right_normal(bezier_normal_d1(t)) * fun(t)
-    c = vec_right_normal(bezier_normal(t)) * fun_d1(t)
-    return a + b + c
-
-
-# create a bezier curve by two points and two normal vectors.
-ps = bezier(refs)
 
 # display it.
 plt.figure()
@@ -101,50 +127,22 @@ plt.grid('on')
 plt.axis('equal')
 
 # draw bezier curve
-plt.plot([v[0] for v in ps], [v[1] for v in ps], '-r', lw=2)
-for i in range(41):
-    arrow_xy = bezier_arrow(i / 40)
-    plt.plot([v[0] for v in arrow_xy], [v[1] for v in arrow_xy], ':b', lw=0.5)
+plt.plot([v[0] for v in lane_xy], [v[1] for v in lane_xy], '-k', lw=1)
+plt.plot([v[0] for v in lane_e_l], [v[1] for v in lane_e_l], '-b', lw=1)
+plt.plot([v[0] for v in lane_e_r], [v[1] for v in lane_e_r], '-b', lw=1)
 
+# draw sample trajectory
+for k in range(10):
+    res = compute_curve_params([20, -5, np.pi / 12, 200, 5 * (k - 5), 0])
+    trajectory_s = np.poly1d(res[0:6])
+    trajectory_l = np.poly1d(res[6:12])
 
-def compute_curve_params(params):
-    src_l = params[0]
-    src_d = params[1]
-    src_yaw = params[2]
-
-    dst_l = params[3]
-    dst_d = params[4]
-    dst_yaw = params[5]
-
-    def constraint(xx):
-        assert len(xx) == 6
-        fun = np.poly1d(xx)
-        fun_d1 = fun.deriv(1)
-        fun_d2 = fun.deriv(2)
-
-        ret = [0] * 6
-
-        # start pos
-        ret[0] = fun(src_l) - src_d
-        # start yaw
-        ret[1] = vec_rate(s_pos_d1(fun, fun_d1, src_l)) - np.tan(src_yaw)
-        # start acc
-        ret[2] = fun_d2(src_l) - 0  # bezier_fn_d2(*refs, 0)
-        # end pos
-        ret[3] = fun(dst_l) - dst_d
-        # end yaw
-        ret[4] = vec_rate(s_pos_d1(fun, fun_d1, dst_l)) - vec_rate(bezier_normal(dst_l))
-        # end acc
-        ret[5] = fun_d2(dst_l) - 0  # bezier_fn_d2(*refs, 1)
-        return ret
-
-    return fsolve(constraint, [0] * 6)
-
-
-for i in range(9):
-    res = compute_curve_params([0, -20, 0, 1, (i - 4) * 5, 0])
-    f5 = np.poly1d(res)
-    ps = [s_pos(f5, i / 100) for i in range(101)]
-    plt.plot([v[0] for v in ps], [v[1] for v in ps], '--g', lw=2)
+    points = []
+    for i in range(num):
+        xy = frenet2xy(trajectory_s(i / num), trajectory_l(i / num))
+        points.append(xy)
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    plt.plot(xs, ys, '-g', lw=0.5)
 
 plt.show()
